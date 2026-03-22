@@ -82,24 +82,105 @@
         const constraints = { video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } };
         navigator.mediaDevices.getUserMedia(constraints).catch(err => console.error(err));
 
-        // MATERIAL & ANTI-VANISH SETUP
+        // THE 0 KB SYNTHETIC STUDIO REFLECTION MAP
+        AFRAME.registerComponent('synthetic-env-map', {
+            init: function () {
+                // 1. Create a tiny digital canvas in the phone's memory
+                const canvas = document.createElement('canvas');
+                canvas.width = 512;
+                canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                // 2. Paint a "Golden Studio" environment for high-contrast metallic reflections
+                const grd = ctx.createLinearGradient(0, 0, 0, 256);
+
+                // The Dark Ceiling (creates deep contrast for the top panels)
+                grd.addColorStop(0.0, "#111111");
+
+                // Overhead Softbox Light (Warm, bright pale-yellow hitting the top)
+                grd.addColorStop(0.2, "#FFF2CC");
+
+                // The Sharp Horizon Glint (Pure white to create that sharp metallic "ping")
+                grd.addColorStop(0.5, "#f2f1a0");
+
+                // The Lower Mid-Tones (Dark goldenrod reflecting back up)
+                grd.addColorStop(0.6, "#8B6508");
+
+                // The Floor (Pitch black so the underside stays dark and grounded)
+                grd.addColorStop(1.0, "#050505");
+
+                ctx.fillStyle = grd;
+                ctx.fillRect(0, 0, 512, 256);
+
+                // 3. Convert to a 360-degree reflection texture
+                const texture = new THREE.CanvasTexture(canvas);
+                texture.colorSpace = THREE.SRGBColorSpace;
+                texture.mapping = THREE.EquirectangularReflectionMapping;
+
+                // 4. Wrap the entire AR scene in this invisible reflection map
+                this.el.sceneEl.object3D.environment = texture;
+            }
+        });
+
+        // MATERIAL & TEXTURE REPEATER FIX
+        // SINGLE TEXTURE REPEATER FIX
         AFRAME.registerComponent('vikram-setup', {
             init: function () {
                 this.el.addEventListener('model-loaded', () => {
                     const mesh = this.el.getObject3D('mesh');
+
+                    // Set how many times you want the base texture to wrap
+                    const repeatX = 3;
+                    const repeatY = 3;
+
                     mesh.traverse(node => {
-                        if (node.isMesh) {
+                        if (node.isMesh && node.material) {
+                            // 1. Stop the model from disappearing at screen edges
                             node.frustumCulled = false;
-                            node.material.emissive = new THREE.Color('#222200');
-                            node.material.emissiveIntensity = 0.6;
-                            node.material.metalness = 0.8;
-                            node.material.roughness = 0.2;
+
+                            const mapsss = ['map', 'metalnessMap', 'roughnessMap',
+                                'normalMap', 'emissiveMap'];
+
+                            // 2. Target ONLY the base color texture ('map')
+                            if (node.material.metalnessMap) {
+                                node.material.metalnessMap.wrapS = THREE.RepeatWrapping;
+                                node.material.metalnessMap.wrapT = THREE.RepeatWrapping;
+                                node.material.metalnessMap.repeat.set(repeatX, repeatY);
+                                node.material.metalnessMap.needsUpdate = true;
+                            }
+
+                            if (node.material.roughnessMap) {
+                                node.material.roughnessMap.wrapS = THREE.RepeatWrapping;
+                                node.material.roughnessMap.wrapT = THREE.RepeatWrapping;
+                                node.material.roughnessMap.repeat.set(repeatX, repeatY);
+                                node.material.roughnessMap.needsUpdate = true;
+                            }
+
+                            if (node.material.normalMap) {
+                                node.material.normalMap.wrapS = THREE.RepeatWrapping;
+                                node.material.normalMap.wrapT = THREE.RepeatWrapping;
+                                node.material.normalMap.repeat.set(repeatX, repeatY);
+                                node.material.normalMap.needsUpdate = true;
+                            }
+
+                            if (node.material.emissiveMap) {
+                                node.material.emissiveMap.wrapS = THREE.RepeatWrapping;
+                                node.material.emissiveMap.wrapT = THREE.RepeatWrapping;
+                                node.material.emissiveMap.repeat.set(repeatX, repeatY);
+                                node.material.emissiveMap.needsUpdate = true;
+                            }
+
+                            // 4. MAKE IT MORE SHINING
+                            node.material.metalness = 1.0;  // 1.0 is maximum metallic reflection
+                            node.material.roughness = 0.1; // Lower number = sharper, glossier shine
+
+                            node.material.needsUpdate = true;
                         }
                     });
                 });
             }
         });
 
+        // FAILSAFE: PAUSE AT END (Anti-Vanish)
         AFRAME.registerComponent('pause-at-end', {
             tick: function () {
                 const mixerComp = this.el.components['animation-mixer'];
@@ -108,9 +189,9 @@
                     if (actions && actions.length > 0) {
                         actions.forEach(action => {
                             const duration = action._clip.duration;
-                            const safetyTime = duration - 0.05; 
+                            const safetyTime = duration - 0.05;
                             if (action.time >= safetyTime) {
-                                action.time = safetyTime; 
+                                action.time = safetyTime;
                                 action.paused = true;
                             }
                         });
@@ -119,6 +200,7 @@
             }
         });
 
+        // MISSION SEQUENCER
         AFRAME.registerComponent('mission-sequencer', {
             init: function () {
                 this.lander = document.querySelector('#vikram');
@@ -133,7 +215,7 @@
             runSequence: function () {
                 this.lander.setAttribute('position', '0 0 1');
                 this.lander.setAttribute('visible', 'true');
-                if(this.jetSound) this.jetSound.play();
+                if (this.jetSound) this.jetSound.play();
                 this.lander.emit('begin-descent');
 
                 setTimeout(() => {
@@ -143,7 +225,7 @@
                 }, 5000);
             },
             reset: function () {
-                if(this.jetSound) { this.jetSound.pause(); this.jetSound.currentTime = 0; }
+                if (this.jetSound) { this.jetSound.pause(); this.jetSound.currentTime = 0; }
                 this.lander.removeAttribute('animation-mixer');
                 this.lander.removeAttribute('pause-at-end');
                 this.lander.setAttribute('visible', 'false');
@@ -175,10 +257,14 @@
         <button class="btn-ticket" onclick="openTicket()">TICKET TO MOON</button>
     </div>
 
-    <a-scene mindar-image="imageTargetSrc: targets.mind; maxTrack: 1;"
-             renderer="colorManagement: true, physicallyCorrectLights: true, exposure: 2.5, toneMapping: ACESFilmic;"
+    <a-scene 
+             synthetic-env-map
+             mindar-image="imageTargetSrc: targets.mind; maxTrack: 1; filterMinCF:0.0001; filterBeta: 0.001; missTolerance: 1;"
+             renderer="colorManagement: true, physicallyCorrectLights: true, exposure: 5.5, toneMapping: ACESFilmic;"
              vr-mode-ui="enabled: false"
-             device-orientation-permission-ui="enabled: false">
+             device-orientation-permission-ui="enabled: false"
+             gltf-model="dracoDecoderPath: https://www.gstatic.com/draco/v1/decoders/;">
+      
 
         <a-assets>
             <a-asset-item id="lander-model" src="chandrayaan3_anim.glb"></a-asset-item>
@@ -187,14 +273,14 @@
         <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
         <a-entity id="target-item" mindar-image-target="targetIndex: 0" mission-sequencer>
-            <a-light type="ambient" color="#FFFFFF" intensity="0.8"></a-light>
-            <a-light type="directional" color="#FFFFFF" intensity="2.0" position="10 500 1"></a-light>
-            <a-light type="hemisphere" color="#DAEFFF" groundColor="#222" intensity="2.0"></a-light>
-            <a-ellipse rotation="0 0 0" radius="0.4" color="#000" opacity="0.4" position="0 0 0.01"></a-ellipse>
+            <a-light type="ambient" color="#FFFFFF" intensity="10.3"></a-light>
+            <a-light type="directional" color="#FFFFFF" intensity="12.5" position="5 10 5"></a-light>
+            <a-light type="hemisphere" color="#FFF5E6" groundColor="#111111" intensity="11.0"></a-light>
+            <a-ellipse rotation="-90 0 0" radius="0.4" color="#000" opacity="0.5" position="0 0 0.01"></a-ellipse>
 
             <a-entity id="vikram"
                       gltf-model="#lander-model"
-                      scale="0.1 0.1 0.1"
+                      scale="0.075 0.070 0.075"
                       position="0 10 0"
                       rotation="90 0 0"
                       visible="false"
